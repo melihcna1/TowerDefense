@@ -105,9 +105,13 @@ public class GameLoopManager : MonoBehaviour
             //tick towers
             foreach (TowerBehaviour tower in TowersInGame)
             {
-                tower.Target = TowerTargeting.GetTarget(tower, TowerTargeting.TargetType.First);
-                tower.Tick();
+                TowerTargeting.GetTarget(tower, TowerTargeting.TargetType.First, (enemy) =>
+                {
+                    tower.Target = enemy;
+                    tower.Tick();
+                });
             }
+
             //apply effects
             //damage enemies
             if(DamageData.Count>0) 

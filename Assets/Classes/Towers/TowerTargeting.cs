@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.Collections;
@@ -13,69 +14,72 @@ public class TowerTargeting : MonoBehaviour
         Close
     }
 
-    public static Enemy GetTarget(TowerBehaviour CurrentTower, TargetType TargetMethod)
+public static void GetTarget(TowerBehaviour CurrentTower, TargetType TargetMethod, Action<Enemy> callback)
 {
-    Collider[] EnemiesInRange = Physics.OverlapSphere(CurrentTower.transform.position, CurrentTower.Range, CurrentTower.EnemiesLayer);
-    if (EnemiesInRange.Length == 0)
+    MainThreadDispatcher.Enqueue(() =>
     {
-        return null;
-    }
-    NativeArray<EnemyData> EnemiesToCalculate = new NativeArray<EnemyData>(EnemiesInRange.Length, Allocator.TempJob);
-    NativeArray<Vector3> NodePositions = new NativeArray<Vector3>(GameLoopManager.NodePositions, Allocator.TempJob);
-    NativeArray<float> NodeDistances = new NativeArray<float>(GameLoopManager.NodeDistances, Allocator.TempJob);
-    NativeArray<int> EnemyToIndex = new NativeArray<int>(1, Allocator.TempJob);
-    int EnemyIndexIndexToReturn = -1;
+        Collider[] EnemiesInRange = Physics.OverlapSphere(CurrentTower.transform.position, CurrentTower.Range, CurrentTower.EnemiesLayer);
+        if (EnemiesInRange.Length == 0)
+        {
+            callback(null);
+            return;
+        }
+        NativeArray<EnemyData> EnemiesToCalculate = new NativeArray<EnemyData>(EnemiesInRange.Length, Allocator.TempJob);
+        NativeArray<Vector3> NodePositions = new NativeArray<Vector3>(GameLoopManager.NodePositions, Allocator.TempJob);
+        NativeArray<float> NodeDistances = new NativeArray<float>(GameLoopManager.NodeDistances, Allocator.TempJob);
+        NativeArray<int> EnemyToIndex = new NativeArray<int>(1, Allocator.TempJob);
+        int EnemyIndexIndexToReturn = -1;
 
-    for (int i = 0; i < EnemiesToCalculate.Length; i++)
-    {
-        Enemy CurrentEnemy = EnemiesInRange[i].transform.parent.GetComponent<Enemy>();
-        int EnemyIndexInList = EntitySummoner.EnemiesInGame.FindIndex(x => x == CurrentEnemy);
-        EnemiesToCalculate[i] = new EnemyData(CurrentEnemy.transform.position, CurrentEnemy.NodeIndex, CurrentEnemy.Health, EnemyIndexInList);
-    }
+        for (int i = 0; i < EnemiesToCalculate.Length; i++)
+        {
+            Enemy CurrentEnemy = EnemiesInRange[i].transform.parent.GetComponent<Enemy>();
+            int EnemyIndexInList = EntitySummoner.EnemiesInGame.FindIndex(x => x == CurrentEnemy);
+            EnemiesToCalculate[i] = new EnemyData(CurrentEnemy.transform.position, CurrentEnemy.NodeIndex, CurrentEnemy.Health, EnemyIndexInList);
+        }
 
-    SearchForEnemy EnemySearchJob = new SearchForEnemy
-    {
-        _EnemiesToCalculate = EnemiesToCalculate,
-        _NodePositions = NodePositions,
-        _NodeDistances = NodeDistances,
-        _EnemyToIndex = EnemyToIndex,
-        TargetingType = (int)TargetMethod,
-        TowerPosition = CurrentTower.transform.position
-    };
+        SearchForEnemy EnemySearchJob = new SearchForEnemy
+        {
+            _EnemiesToCalculate = EnemiesToCalculate,
+            _NodePositions = NodePositions,
+            _NodeDistances = NodeDistances,
+            _EnemyToIndex = EnemyToIndex,
+            TargetingType = (int)TargetMethod,
+            TowerPosition = CurrentTower.transform.position
+        };
 
-    switch ((int)TargetMethod)
-    {
-        case 0: // first
-            EnemySearchJob.CompareValue = Mathf.Infinity;
-            break;
-        case 1: // last
-            EnemySearchJob.CompareValue = Mathf.NegativeInfinity;
-            break;
-        case 2: // close
-            goto case 0;
-    }
+        switch ((int)TargetMethod)
+        {
+            case 0: // first
+                EnemySearchJob.CompareValue = Mathf.Infinity;
+                break;
+            case 1: // last
+                EnemySearchJob.CompareValue = Mathf.NegativeInfinity;
+                break;
+            case 2: // close
+                goto case 0;
+        }
 
-    JobHandle dependency = new JobHandle();
-    JobHandle SearchJobHandle = EnemySearchJob.Schedule(EnemiesToCalculate.Length, dependency);
-    SearchJobHandle.Complete();
+        JobHandle dependency = new JobHandle();
+        JobHandle SearchJobHandle = EnemySearchJob.Schedule(EnemiesToCalculate.Length, dependency);
+        SearchJobHandle.Complete();
 
-    if (EnemyToIndex[0] != -1)
-    {
-        EnemyIndexIndexToReturn = EnemiesToCalculate[EnemyToIndex[0]].EnemyIndex;
+        if (EnemyToIndex[0] != -1)
+        {
+            EnemyIndexIndexToReturn = EnemiesToCalculate[EnemyToIndex[0]].EnemyIndex;
+            EnemiesToCalculate.Dispose();
+            NodePositions.Dispose();
+            NodeDistances.Dispose();
+            EnemyToIndex.Dispose();
+            callback(EntitySummoner.EnemiesInGame[EnemyIndexIndexToReturn]);
+            return;
+        }
         EnemiesToCalculate.Dispose();
         NodePositions.Dispose();
         NodeDistances.Dispose();
-        EnemyToIndex.Dispose(); 
-        return EntitySummoner.EnemiesInGame[EnemyIndexIndexToReturn];
-    }
-    EnemiesToCalculate.Dispose();
-    NodePositions.Dispose();
-    NodeDistances.Dispose();
-    EnemyToIndex.Dispose(); 
- 
-    return null;
- 
-   
+        EnemyToIndex.Dispose();
+
+        callback(null);
+    });
 }
     struct EnemyData
     {
